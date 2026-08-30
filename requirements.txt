@@ -1,3 +1,4 @@
-streamlit
-google-api-python-client
-isodate
+streamlit>=1.30.0
+google-api-python-client>=2.100.0
+pandas>=2.0.0
+isodate>=0.6.1
