@@ -26,7 +26,7 @@ def save_json(filename, data):
 
 # --- 페이지 설정 ---
 st.set_page_config(
-    page_title="YouTube Popularity Radar V9.3",
+    page_title="YouTube Popularity Radar V9.4",
     page_icon="🔥",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -40,6 +40,25 @@ if "saved_channels" not in st.session_state:
     st.session_state.saved_channels = load_json(CHANNELS_FILE, [])
 
 # --- 헬퍼 함수 ---
+def get_published_after(option):
+    now = datetime.now(timezone.utc)
+    if option == "최근 1일 (24시간)": delta = timedelta(days=1)
+    elif option == "최근 3일": delta = timedelta(days=3)
+    elif option == "최근 1주일 (7일)": delta = timedelta(days=7)
+    elif option == "최근 15일": delta = timedelta(days=15)
+    elif option == "최근 1달 (30일)": delta = timedelta(days=30)
+    else: return None
+    
+    target_time = now - delta
+    return target_time.replace(microsecond=0).strftime("%Y-%m-%dT%H:%M:%S") + "Z"
+
+def format_api_datetime(date_obj, is_end_of_day=False):
+    if is_end_of_day:
+        dt = datetime.combine(date_obj, datetime.max.time()).replace(tzinfo=timezone.utc)
+    else:
+        dt = datetime.combine(date_obj, datetime.min.time()).replace(tzinfo=timezone.utc)
+    return dt.strftime("%Y-%m-%dT%H:%M:%S") + "Z"
+
 def format_duration(seconds):
     m, s = divmod(seconds, 60)
     return f"{m}분 {s}초" if m > 0 else f"{s}초"
@@ -49,6 +68,7 @@ def format_num(n):
     if n >= 10000: return f"{n / 10000:.1f}만"
     return f"{n:,}"
 
+# 📌 급상승 판별 함수
 def check_trending(published_at_str, view_count):
     try:
         pub_date = datetime.strptime(published_at_str, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
@@ -68,7 +88,7 @@ def check_trending(published_at_str, view_count):
 # --- 사이드바 제어 패널 ---
 with st.sidebar:
     st.title("🔥 인기 영상 랭킹 수집")
-    st.caption("Streamlit v9.3 (대량 데이터 다중 수집 적용)")
+    st.caption("Streamlit v9.4 (기간 설정 + 대량 수집 복구)")
     st.markdown("---")
     
     # 1. API Key 체크
@@ -77,7 +97,7 @@ with st.sidebar:
         api_key = st.secrets["YOUTUBE_API_KEY"]
         st.success("✅ YouTube API KEY 연결 완료")
     else:
-        st.error("⚠️ API KEY가 등록되지 않았습니다.")
+        st.error("⚠️ API KEY가 등록되지 않았습니다.\nSecrets 설정을 확인해 주세요.")
     
     st.markdown("---")
     
@@ -89,21 +109,56 @@ with st.sidebar:
     region_label = st.selectbox("🌍 국가 선택 (Region)", list(region_dict.keys()), index=0)
     region_code = region_dict[region_label]
 
-    # 3. 키워드 검색 옵션 (선택 사항)
+    # 3. 업로드 기간 선택 (복구완료)
+    date_option = st.selectbox(
+        "📅 업로드 날짜 기준", 
+        ["최근 1일 (24시간)", "최근 3일", "최근 1주일 (7일)", "최근 15일", "최근 1달 (30일)", "📅 특정 날짜 지정"], 
+        index=2
+    )
+    
+    start_date = None
+    end_date = None
+    
+    if date_option == "📅 특정 날짜 지정":
+        st.caption("👇 시작일과 종료일을 지정하세요.")
+        col_d1, col_d2 = st.columns(2)
+        with col_d1:
+            start_date = st.date_input("시작일 (From)", value=datetime(2026, 8, 1))
+        with col_d2:
+            end_date = st.date_input("종료일 (To)", value=datetime(2026, 8, 31))
+        
+        st.info(f"📅 기간: **{start_date.strftime('%Y-%m-%d')} ~ {end_date.strftime('%Y-%m-%d')}**")
+
+    # 4. 검색 키워드 입력 (옵션)
     keyword_input = st.text_input("🔍 검색 키워드 (비워두면 전체 탐색)", value="")
 
-    # 4. 탐색 깊이 (호출 페이지 수)
-    fetch_pages = st.slider("📊 탐색 데이터 수 (50개 단위)", min_value=1, max_value=5, value=3, help="5페이지 설정 시 최대 250개 동영상을 조회하여 500만 이상 동영상을 추출합니다.")
+    # 5. 탐색 깊이 설정
+    fetch_pages = st.slider("📊 탐색 데이터 수 (50개 단위)", min_value=1, max_value=5, value=3, help="페이지 수가 높을수록 더 많은 영상(최대 250개)에서 500만 뷰 이상 동영상을 찾아냅니다.")
+
+    # 6. 저장된 관심 채널 관리 Expander
+    with st.expander("⭐ 저장된 관심 채널 관리"):
+        if not st.session_state.saved_channels:
+            st.caption("저장된 채널이 없습니다.")
+        else:
+            for ch in list(st.session_state.saved_channels):
+                col_c1, col_c2 = st.columns([3, 1])
+                with col_c1:
+                    st.markdown(f"[{ch['title']}](https://youtube.com/channel/{ch['id']})")
+                with col_c2:
+                    if st.button("삭제", key=f"del_ch_{ch['id']}"):
+                        st.session_state.saved_channels = [c for c in st.session_state.saved_channels if c['id'] != ch['id']]
+                        save_json(CHANNELS_FILE, st.session_state.saved_channels)
+                        st.rerun()
 
     st.markdown("---")
     st.subheader("📊 조회수 & 영상 형태 필터")
     
-    # 5. 조회수 범위 필터
+    # 7. 조회수 범위 필터
     col_v1, col_v2 = st.columns(2)
     with col_v1: min_view = st.number_input("최소 조회수", min_value=0, value=5000000, step=500000)
     with col_v2: max_view = st.number_input("최대 조회수 (0은 제한없음)", min_value=0, value=0, step=1000000)
     
-    # 6. 영상 형태 선택
+    # 8. 영상 형태 선택
     video_type = st.radio(
         "📱 영상 형태 선택",
         ["📱 숏폼 (1분 미만)", "🎬 롱폼 (1분 이상)", "🌐 전체"],
@@ -113,19 +168,21 @@ with st.sidebar:
     st.markdown("---")
     search_triggered = st.button("🚀 데이터 수집 및 분석 시작", use_container_width=True)
 
-# --- 데이터 수집 로직 (다중 페이지 탐색) ---
+# --- 데이터 수집 로직 ---
 if search_triggered:
     if not api_key:
         st.error("⚠️ 시스템에 등록된 API 키가 없습니다.")
+    elif date_option == "📅 특정 날짜 지정" and start_date > end_date:
+        st.error("⚠️ 시작일이 종료일보다 늦을 수 없습니다.")
     else:
-        with st.spinner(f"최대 {fetch_pages * 50}개 동영상을 수집 중입니다..."):
+        with st.spinner(f"설정한 기간에서 최대 {fetch_pages * 50}개 동영상을 탐색 중입니다..."):
             try:
                 youtube = build("youtube", "v3", developerKey=api_key)
                 
                 all_video_ids = []
                 next_page_token = None
                 
-                # 지정된 페이지 수만큼 반복 호출하여 후보군을 200~250개 확보
+                # 다중 페이지 반복 수집 (기간 파라미터 주입)
                 for _ in range(fetch_pages):
                     search_kwargs = {
                         "part": "snippet",
@@ -135,8 +192,18 @@ if search_triggered:
                         "maxResults": 50,
                         "pageToken": next_page_token
                     }
-                    if region_code:
+                    
+                    if region_code: 
                         search_kwargs["regionCode"] = region_code
+                    
+                    # 📌 [복구] 날짜 파라미터 적용
+                    if date_option == "📅 특정 날짜 지정":
+                        search_kwargs["publishedAfter"] = format_api_datetime(start_date, is_end_of_day=False)
+                        search_kwargs["publishedBefore"] = format_api_datetime(end_date, is_end_of_day=True)
+                    else:
+                        published_after = get_published_after(date_option)
+                        if published_after:
+                            search_kwargs["publishedAfter"] = published_after
                     
                     search_res = youtube.search().list(**search_kwargs).execute()
                     items = search_res.get("items", [])
@@ -150,10 +217,10 @@ if search_triggered:
                         break
 
                 if not all_video_ids:
-                    st.warning("수집된 영상이 없습니다.")
+                    st.warning("지정한 기간 내에 수집된 영상이 없습니다.")
                     st.session_state.raw_data = []
                 else:
-                    # 50개 단위로 나누어 API 상세 데이터 조회
+                    # 50개 단위로 세부 정보 요청
                     video_details = []
                     for i in range(0, len(all_video_ids), 50):
                         chunk_ids = all_video_ids[i:i+50]
@@ -163,7 +230,7 @@ if search_triggered:
                         ).execute()
                         video_details.extend(v_res.get("items", []))
                     
-                    # 채널 정보 가져오기
+                    # 채널 구독자 수 가져오기
                     channel_ids = list(set([item["snippet"]["channelId"] for item in video_details]))
                     channel_map = {}
                     
@@ -236,8 +303,10 @@ if filtered_data:
         st.subheader(f"🏆 조건 만족 영상: {len(filtered_data)}개")
 
     if len(filtered_data) == 0:
-        st.warning("⚠️ 지정한 조건(최소 500만 이상 등)에 맞는 영상이 탐색 데이터 내에 없습니다. 사이드바에서 '탐색 데이터 수' 슬라이더를 더 늘려보세요.")
+        st.warning("⚠️ 지정한 기간 및 조건(최소 500만 이상)에 맞는 영상이 탐색 범위 내에 없습니다. '탐색 데이터 수' 슬라이더를 더 올려보세요.")
     else:
+        saved_ch_ids = [c["id"] for c in st.session_state.saved_channels]
+
         cols = st.columns(4)
         for idx, item in enumerate(filtered_data):
             col = cols[idx % 4]
@@ -265,5 +334,17 @@ if filtered_data:
                         st.metric(label="조회수", value=format_num(item['viewCount']))
                     with stat_col2:
                         st.metric(label="구독자", value=format_num(item['subCount']))
+                    
+                    if item["channelId"] in saved_ch_ids:
+                        st.button("✅ 저장된 채널", key=f"btn_saved_{item['id']}", disabled=True, use_container_width=True)
+                    else:
+                        if st.button("⭐ 채널 저장", key=f"btn_save_{item['id']}", use_container_width=True):
+                            st.session_state.saved_channels.append({
+                                "id": item["channelId"],
+                                "title": item["channelTitle"]
+                            })
+                            save_json(CHANNELS_FILE, st.session_state.saved_channels)
+                            st.toast(f"'{item['channelTitle']}' 채널이 저장되었습니다! ⭐")
+                            st.rerun()
 else:
-    st.info("👈 사이드바에서 '🚀 데이터 수집 및 분석 시작' 버튼을 누르세요.")
+    st.info("👈 사이드바에서 기간 지정 후 '🚀 데이터 수집 및 분석 시작' 버튼을 누르세요.")
