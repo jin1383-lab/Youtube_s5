@@ -5,26 +5,7 @@ import isodate
 import json
 import os
 
-KEYWORDS_FILE = "keywords.json"
 CHANNELS_FILE = "channels.json"
-
-# 유튜브 주요 기본 카테고리 매핑 (ID: 이름)
-YOUTUBE_CATEGORIES = {
-    "전체 (카테고리 지정 안함)": "",
-    "🎬 영화/애니메이션": "1",
-    "🚗 자동차": "2",
-    "🎵 음악": "10",
-    "🐶 반려동물/동물": "15",
-    "⚽ 스포츠": "17",
-    "🎮 게임": "20",
-    "📷 일상/블로그": "22",
-    "🤣 코미디": "23",
-    "🎭 엔터테인먼트": "24",
-    "📰 뉴스/정치": "25",
-    "💡 노하우/스타일": "26",
-    "🎓 교육": "27",
-    "🔬 과학기술": "28"
-}
 
 # --- JSON 파일 관리 헬퍼 함수 ---
 def load_json(filename, default_val):
@@ -45,8 +26,8 @@ def save_json(filename, data):
 
 # --- 페이지 설정 ---
 st.set_page_config(
-    page_title="YouTube Insight Dashboard V8.1",
-    page_icon="🚀",
+    page_title="YouTube Popularity Radar V9.1",
+    page_icon="🔥",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -55,28 +36,17 @@ st.set_page_config(
 if "raw_data" not in st.session_state:
     st.session_state.raw_data = []
 
-if "keyword_history" not in st.session_state:
-    st.session_state.keyword_history = load_json(KEYWORDS_FILE, ["#family", "#funny cat", "#comedy"])
-
 if "saved_channels" not in st.session_state:
     st.session_state.saved_channels = load_json(CHANNELS_FILE, [])
 
-if "search_keyword_input" not in st.session_state:
-    st.session_state.search_keyword_input = ""
-
 # --- 헬퍼 함수 ---
 def get_published_after(option):
-    if option in ["전체", "📅 특정 년/월/일 지정"]: return None
     now = datetime.now(timezone.utc)
-    if option == "최근 24시간": delta = timedelta(days=1)
+    if option == "최근 1일 (24시간)": delta = timedelta(days=1)
     elif option == "최근 3일": delta = timedelta(days=3)
-    elif option == "최근 1주일": delta = timedelta(days=7)
-    elif option == "최근 1달": delta = timedelta(days=30)
-    elif option == "최근 3개월": delta = timedelta(days=90)
-    elif option == "최근 6개월": delta = timedelta(days=180)
-    elif option == "최근 1년": delta = timedelta(days=365)
-    elif option == "최근 2년": delta = timedelta(days=365 * 2)
-    elif option == "최근 3년": delta = timedelta(days=365 * 3)
+    elif option == "최근 1주일 (7일)": delta = timedelta(days=7)
+    elif option == "최근 15일": delta = timedelta(days=15)
+    elif option == "최근 1달 (30일)": delta = timedelta(days=30)
     else: return None
     
     target_time = now - delta
@@ -116,15 +86,10 @@ def check_trending(published_at_str, view_count):
         pass
     return False, ""
 
-def apply_selected_keyword():
-    selected = st.session_state.history_select
-    if selected != "선택하세요...":
-        st.session_state.search_keyword_input = selected
-
 # --- 사이드바 제어 패널 ---
 with st.sidebar:
-    st.title("🚀 Insight Dash")
-    st.caption("Streamlit v8.1 (카테고리 검색 & 무키워드 TOP 50 지원)")
+    st.title("🔥 인기 영상 랭킹 1~50")
+    st.caption("Streamlit v9.1 (카테고리/키워드 무관 TOP 50)")
     st.markdown("---")
     
     # 1. API Key 체크
@@ -139,61 +104,56 @@ with st.sidebar:
     
     # 2. 국가 선택
     region_dict = {
-        "🌐 글로벌 (전체)": "", "🇰🇷 한국 (Korea)": "KR", "🇺🇸 미국 (USA)": "US", 
-        "🇯🇵 일본 (Japan)": "JP", "🇪🇸 스페인 (Spain)": "ES", "🇩🇪 독일 (Germany)": "DE", 
-        "🇬🇧 영국 (UK)": "GB", "🇫🇷 프랑스 (France)": "FR", "🇮🇹 이탈리아 (Italy)": "IT"
+        "🇰🇷 한국 (Korea)": "KR", "🌐 글로벌 (전체)": "", "🇺🇸 미국 (USA)": "US", 
+        "🇯🇵 일본 (Japan)": "JP", "🇪🇸 스페인 (Spain)": "ES", "🇬🇧 영국 (UK)": "GB"
     }
-    region_label = st.selectbox("🌍 국가 선택 (Region)", list(region_dict.keys()), index=1)
+    region_label = st.selectbox("🌍 국가 선택 (Region)", list(region_dict.keys()), index=0)
     region_code = region_dict[region_label]
-    
-    # 3. 유튜브 카테고리 선택 (NEW)
-    selected_category_label = st.selectbox("📂 유튜브 카테고리 선택", list(YOUTUBE_CATEGORIES.keys()), index=0)
-    category_id = YOUTUBE_CATEGORIES[selected_category_label]
 
-    # 4. 키워드 검색 (선택 사항)
-    keyword = st.text_input(
-        "🔍 키워드 검색 (선택 - 비워두면 카테고리 전체)", 
-        key="search_keyword_input",
-        placeholder="비워두거나 키워드 입력 (예: #family)"
-    )
-    
-    if st.session_state.keyword_history:
-        st.selectbox(
-            "📜 저장된 자주 쓰는 키워드",
-            ["선택하세요..."] + st.session_state.keyword_history,
-            key="history_select",
-            on_change=apply_selected_keyword
-        )
-
-    # 5. 기간 설정 방식 선택 (기본값: 특정 년/월/일 지정)
+    # 3. 업로드 기간 선택
     date_option = st.selectbox(
-        "📅 기간 설정 방식", 
-        ["📅 특정 년/월/일 지정", "최근 24시간", "최근 3일", "최근 1주일", "최근 1달", "최근 3개월", "최근 6개월", "최근 1년", "전체"], 
-        index=0
+        "📅 업로드 날짜 기준", 
+        ["최근 1일 (24시간)", "최근 3일", "최근 1주일 (7일)", "최근 15일", "최근 1달 (30일)", "📅 특정 날짜 지정"], 
+        index=2
     )
     
     start_date = None
     end_date = None
     
-    if date_option == "📅 특정 년/월/일 지정":
-        st.caption("👇 특정 기간을 선택하세요.")
+    if date_option == "📅 특정 날짜 지정":
+        st.caption("👇 시작일과 종료일을 지정하세요.")
         col_d1, col_d2 = st.columns(2)
         with col_d1:
             start_date = st.date_input("시작일 (From)", value=datetime(2026, 8, 1))
         with col_d2:
             end_date = st.date_input("종료일 (To)", value=datetime(2026, 8, 29))
         
-        st.info(f"📅 검색 범위: **{start_date.strftime('%Y-%m-%d')} ~ {end_date.strftime('%Y-%m-%d')}**")
-    
+        st.info(f"📅 기간: **{start_date.strftime('%Y-%m-%d')} ~ {end_date.strftime('%Y-%m-%d')}**")
+
+    # 4. 저장된 관심 채널 관리 Expander
+    with st.expander("⭐ 저장된 관심 채널 관리"):
+        if not st.session_state.saved_channels:
+            st.caption("저장된 채널이 없습니다.")
+        else:
+            for ch in list(st.session_state.saved_channels):
+                col_c1, col_c2 = st.columns([3, 1])
+                with col_c1:
+                    st.markdown(f"[{ch['title']}](https://youtube.com/channel/{ch['id']})")
+                with col_c2:
+                    if st.button("삭제", key=f"del_ch_{ch['id']}"):
+                        st.session_state.saved_channels = [c for c in st.session_state.saved_channels if c['id'] != ch['id']]
+                        save_json(CHANNELS_FILE, st.session_state.saved_channels)
+                        st.rerun()
+
     st.markdown("---")
-    st.subheader("📊 실시간 정밀 필터")
+    st.subheader("📊 조회수 & 영상 형태 필터")
     
-    # 6. 조회수 범위 필터
+    # 5. 조회수 범위 필터
     col_v1, col_v2 = st.columns(2)
-    with col_v1: min_view = st.number_input("최소 조회수", min_value=0, value=1000000, step=100000)
-    with col_v2: max_view = st.number_input("최대 조회수 (0은 없음)", min_value=0, value=0, step=100000)
+    with col_v1: min_view = st.number_input("최소 조회수", min_value=0, value=1000000, step=500000)
+    with col_v2: max_view = st.number_input("최대 조회수 (0은 제한없음)", min_value=0, value=0, step=1000000)
     
-    # 7. 영상 형태 선택
+    # 6. 영상 형태 선택
     video_type = st.radio(
         "📱 영상 형태 선택",
         ["📱 숏폼 (1분 미만)", "🎬 롱폼 (1분 이상)", "🌐 전체"],
@@ -201,47 +161,31 @@ with st.sidebar:
     )
 
     st.markdown("---")
-    search_triggered = st.button("🚀 TOP 50 분석 시작", use_container_width=True)
+    search_triggered = st.button("🚀 TOP 1~50 조회하기", use_container_width=True)
 
-# --- 데이터 수집 로직 ---
+# --- 데이터 수집 로직 (TOP 50 수집) ---
 if search_triggered:
     if not api_key:
         st.error("⚠️ 시스템에 등록된 API 키가 없습니다.")
-    elif date_option == "📅 특정 년/월/일 지정" and start_date > end_date:
+    elif date_option == "📅 특정 날짜 지정" and start_date > end_date:
         st.error("⚠️ 시작일이 종료일보다 늦을 수 없습니다.")
     else:
-        if keyword:
-            if keyword in st.session_state.keyword_history:
-                st.session_state.keyword_history.remove(keyword)
-            st.session_state.keyword_history.insert(0, keyword)
-            st.session_state.keyword_history = st.session_state.keyword_history[:30]
-            save_json(KEYWORDS_FILE, st.session_state.keyword_history)
-
-        with st.spinner("유튜브 데이터 수집 및 TOP 50 추출 중..."):
+        with st.spinner("최신 인기 영상 TOP 1~50 수집 중..."):
             try:
                 youtube = build("youtube", "v3", developerKey=api_key)
                 
                 search_kwargs = {
                     "part": "snippet",
                     "type": "video",
-                    "order": "viewCount",  # 조회수 기준 높은 순 정렬
+                    "order": "viewCount",
+                    "q": "#",  # 넓은 범위 수집
                     "maxResults": 50
                 }
                 
-                # 키워드가 있으면 추가, 없으면 제거
-                if keyword.strip():
-                    search_kwargs["q"] = keyword.strip()
-                
-                # 카테고리 ID 적용
-                if category_id:
-                    search_kwargs["videoCategoryId"] = category_id
-                
-                # 국가 코드 적용
                 if region_code: 
                     search_kwargs["regionCode"] = region_code
                 
-                # 기간 설정
-                if date_option == "📅 특정 년/월/일 지정":
+                if date_option == "📅 특정 날짜 지정":
                     search_kwargs["publishedAfter"] = format_api_datetime(start_date, is_end_of_day=False)
                     search_kwargs["publishedBefore"] = format_api_datetime(end_date, is_end_of_day=True)
                 else:
@@ -249,28 +193,35 @@ if search_triggered:
                     if published_after:
                         search_kwargs["publishedAfter"] = published_after
                 
+                # 1~50위 수집
                 search_res = youtube.search().list(**search_kwargs).execute()
-                video_ids = [item["id"]["videoId"] for item in search_res.get("items", [])]
+                video_items = search_res.get("items", [])
+                video_ids = [item["id"]["videoId"] for item in video_items]
                 
                 if not video_ids:
-                    st.warning("선택한 조건에 일치하는 영상이 없습니다.")
+                    st.warning("지정한 기간에 수집된 영상이 없습니다.")
                     st.session_state.raw_data = []
                 else:
-                    video_res = youtube.videos().list(
+                    # 영상 세부 정보 가져오기
+                    v_res = youtube.videos().list(
                         part="statistics,snippet,contentDetails",
                         id=",".join(video_ids)
                     ).execute()
+                    video_details = v_res.get("items", [])
                     
-                    channel_ids = list(set([item["snippet"]["channelId"] for item in video_res.get("items", [])]))
-                    channel_res = youtube.channels().list(
-                        part="statistics",
-                        id=",".join(channel_ids)
-                    ).execute()
-                    
-                    channel_map = {c["id"]: int(c["statistics"].get("subscriberCount", 1)) for c in channel_res.get("items", [])}
+                    # 채널 구독자 수 가져오기
+                    channel_ids = list(set([item["snippet"]["channelId"] for item in video_details]))
+                    channel_map = {}
+                    if channel_ids:
+                        c_res = youtube.channels().list(
+                            part="statistics",
+                            id=",".join(channel_ids)
+                        ).execute()
+                        for c in c_res.get("items", []):
+                            channel_map[c["id"]] = int(c["statistics"].get("subscriberCount", 1))
                     
                     parsed_list = []
-                    for item in video_res.get("items", []):
+                    for item in video_details:
                         views = int(item["statistics"].get("viewCount", 0))
                         ch_id = item["snippet"]["channelId"]
                         subs = channel_map.get(ch_id, 1)
@@ -297,19 +248,19 @@ if search_triggered:
                 st.error(f"오류가 발생했습니다: {e}")
 
 # --- 메인 레이아웃 및 필터링 ---
-st.title("📺 YouTube Insight Dashboard")
+st.title("📺 YouTube Popularity Radar")
 
 col_count, col_sort = st.columns([2, 3])
 filtered_data = st.session_state.raw_data
 
 if filtered_data:
-    # 최소/최대 조회수 필터 적용
+    # 1. 최소/최대 조회수 필터링
     filtered_data = [
         item for item in filtered_data
         if item["viewCount"] >= min_view and (max_view == 0 or item["viewCount"] <= max_view)
     ]
     
-    # 숏폼/롱폼 필터 적용
+    # 2. 숏폼/롱폼 필터링
     if video_type == "📱 숏폼 (1분 미만)":
         filtered_data = [i for i in filtered_data if i["duration"] < 60]
     elif video_type == "🎬 롱폼 (1분 이상)":
@@ -326,7 +277,7 @@ if filtered_data:
         filtered_data = sorted(filtered_data, key=lambda x: x["publishedAt"], reverse=True)
 
     with col_count:
-        st.subheader(f"🏆 TOP 랭킹 결과: {len(filtered_data)}개 ({video_type.split()[1]})")
+        st.subheader(f"🏆 조건 만족 영상: {len(filtered_data)}개 ({video_type.split()[1]})")
 
     saved_ch_ids = [c["id"] for c in st.session_state.saved_channels]
 
@@ -335,7 +286,7 @@ if filtered_data:
         col = cols[idx % 4]
         with col:
             with st.container(border=True):
-                # 순위 표시 (1위 ~ N위)
+                # 순위 표시
                 st.markdown(f"### 🥇 **{idx + 1}위**")
                 
                 is_trending, trend_reason = check_trending(item["publishedAt"], item["viewCount"])
@@ -371,4 +322,4 @@ if filtered_data:
                         st.toast(f"'{item['channelTitle']}' 채널이 저장되었습니다! ⭐")
                         st.rerun()
 else:
-    st.info("👈 왼쪽 사이드바에서 조건(카테고리, 날짜, 조회수 등)을 선택한 뒤 '🚀 TOP 50 분석 시작' 버튼을 눌러주세요.")
+    st.info("👈 왼쪽 사이드바에서 기간 및 최소 조회수를 설정한 후 '🚀 TOP 1~50 조회하기' 버튼을 누르세요.")
