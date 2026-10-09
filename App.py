@@ -70,7 +70,10 @@ def fetch(key, query, channel, start, end, max_results, order):
         for it in data.get("items", []):
             st_, sn = it.get("statistics", {}), it["snippet"]
             pub = datetime.fromisoformat(sn["publishedAt"].replace("Z", "+00:00")).astimezone(KST)
+            thumbs = sn.get("thumbnails", {})
+            thumb = (thumbs.get("medium") or thumbs.get("high") or thumbs.get("default") or {}).get("url", "")
             rows.append({
+                "썸네일": thumb,
                 "업로드일": pub.strftime("%Y-%m-%d %H:%M"),
                 "제목": sn["title"],
                 "채널": sn["channelTitle"],
@@ -113,7 +116,7 @@ with st.sidebar:
     min_likes = st.number_input("좋아요수 ≥", 0, step=100)
 
     run = st.button("검색", type="primary", use_container_width=True)
-    st.caption("검색 1회(50개)당 할당량 100 소모 / 일 10,000")
+    st.caption(f"검색 1회(50개)당 할당량 100 소모 / 일 10,000")
 
 if run:
     if not api_key:
@@ -146,20 +149,42 @@ if df is not None:
         m3.metric("총 댓글수", f"{int(f['댓글수'].sum()):,}")
         m4.metric("총 좋아요수", f"{int(f['좋아요수'].sum()):,}")
 
-        sort_col = st.radio("정렬 기준", ["조회수", "댓글수", "좋아요수", "업로드일"], horizontal=True)
+        o1, o2 = st.columns([3, 1])
+        sort_col = o1.radio("정렬 기준", ["조회수", "댓글수", "좋아요수", "업로드일"], horizontal=True)
+        view = o2.radio("보기 방식", ["표", "카드"], horizontal=True)
         f = f.sort_values(sort_col, ascending=False, na_position="last")
 
-        st.dataframe(
-            f,
-            use_container_width=True,
-            hide_index=True,
-            column_config={
-                "조회수": st.column_config.NumberColumn(format="%d"),
-                "댓글수": st.column_config.NumberColumn(format="%d", help="비공개/댓글 중지는 빈칸"),
-                "좋아요수": st.column_config.NumberColumn(format="%d", help="비공개는 빈칸"),
-                "링크": st.column_config.LinkColumn("링크", display_text="열기"),
-            },
-        )
+        def n(v):
+            return "비공개" if pd.isna(v) else f"{int(v):,}"
+
+        if view == "카드":
+            cards = f.head(60)
+            if len(f) > 60:
+                st.caption(f"카드 보기는 상위 60개만 표시합니다. (전체 {len(f)}개는 표 보기에서 확인)")
+            for i in range(0, len(cards), 3):
+                cols = st.columns(3)
+                for col, (_, r) in zip(cols, cards.iloc[i:i + 3].iterrows()):
+                    with col:
+                        if r["썸네일"]:
+                            st.image(r["썸네일"], use_container_width=True)
+                        st.markdown(f"**[{r['제목']}]({r['링크']})**")
+                        st.caption(f"{r['채널']} · {r['업로드일']}")
+                        st.write(f"👁 {n(r['조회수'])}  💬 {n(r['댓글수'])}  👍 {n(r['좋아요수'])}")
+
+        else:
+            st.dataframe(
+                f,
+                use_container_width=True,
+                hide_index=True,
+                row_height=70,
+                column_config={
+                    "썸네일": st.column_config.ImageColumn("썸네일", width="medium"),
+                    "조회수": st.column_config.NumberColumn(format="%d"),
+                    "댓글수": st.column_config.NumberColumn(format="%d", help="비공개/댓글 중지는 빈칸"),
+                    "좋아요수": st.column_config.NumberColumn(format="%d", help="비공개는 빈칸"),
+                    "링크": st.column_config.LinkColumn("링크", display_text="열기"),
+                },
+            )
 
         st.download_button(
             "CSV 다운로드",
