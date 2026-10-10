@@ -140,10 +140,10 @@ with st.sidebar:
     form_label = st.radio("영상 형식", ["숏폼", "롱폼"], horizontal=True)  # 기본값: 숏폼
     period = st.selectbox("업로드 기간", list(PERIODS.keys()), index=2)
 
-    max_results = st.slider("검색 영상 수", 10, 500, 50, step=10)
+    max_results = st.slider("검색 영상 수", 50, 500, 50, step=50)
     order_label = st.radio("검색 정렬", list(ORDERS.keys()), horizontal=True)
 
-    min_views = st.number_input("최소 조회수", min_value=0, value=1_000_000, step=100_000)
+    min_views = st.number_input("최소 조회수", min_value=0, value=1000000, step=100000)
 
     run = st.button("검색", type="primary", use_container_width=True)
     st.caption("검색 1회(50개)당 API 할당량 100 소모 (일 10,000). 롱폼은 검색이 2회 실행되어 2배 소모됩니다.")
