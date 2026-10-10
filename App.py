@@ -12,7 +12,7 @@ SHORTS_MAX_SEC = 180  # 숏폼 기준: 3분 이하
 
 PERIODS = {"1일": 1, "3일": 3, "1주일": 7, "1개월": 30, "3개월": 90, "6개월": 180, "1년": 365}
 COUNTRIES = {"한국": "KR", "일본": "JP", "미국": "US", "글로벌": None}
-ORDERS = {"최신순": "date", "조회수순": "viewCount"}
+ORDERS = {"조회수순": "viewCount", "최신순": "date"}
 
 st.set_page_config(page_title="YouTube 기간별 검색기", page_icon="📊", layout="wide")
 
@@ -55,21 +55,18 @@ def call(key, endpoint, params):
     return r.json()
 
 
-def search_ids(key, query, channel, start, region, duration, max_results, order):
+def search_ids(key, query, start, region, duration, max_results, order):
     ids, token = [], None
     while len(ids) < max_results:
         params = {
             "part": "id",
             "type": "video",
+            "q": query,
             "publishedAfter": start,
             "videoDuration": duration,
             "order": order,
             "maxResults": min(50, max_results - len(ids)),
         }
-        if query:
-            params["q"] = query
-        if channel:
-            params["channelId"] = channel
         if region:
             params["regionCode"] = region
         if token:
@@ -83,12 +80,12 @@ def search_ids(key, query, channel, start, region, duration, max_results, order)
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
-def fetch(key, query, channel, start, region, form, max_results, order):
+def fetch(key, query, start, region, form, max_results, order):
     # 숏폼: 4분 미만 검색 후 3분 이하만 남김 / 롱폼: 4분 이상(중간+긴 영상)
     durations = ["short"] if form == "short" else ["medium", "long"]
     ids = []
     for dur in durations:
-        for vid in search_ids(key, query, channel, start, region, dur, max_results, order):
+        for vid in search_ids(key, query, start, region, dur, max_results, order):
             if vid not in ids:
                 ids.append(vid)
 
@@ -138,32 +135,32 @@ with st.sidebar:
         api_key = st.text_input("YouTube API Key", type="password")
 
     query = st.text_input("검색어")
-    channel = st.text_input("채널 ID (선택, UC...)")
 
     country = st.radio("국가", list(COUNTRIES.keys()), horizontal=True)
     form_label = st.radio("영상 형식", ["숏폼", "롱폼"], horizontal=True)  # 기본값: 숏폼
     period = st.selectbox("업로드 기간", list(PERIODS.keys()), index=2)
 
-    max_results = st.slider("최대 영상 수", 10, 500, 50, step=10)
-    order_label = st.radio("정렬 방식(검색)", list(ORDERS.keys()), horizontal=True)
+    max_results = st.number_input("검색 영상 수", min_value=50, max_value=500, value=50, step=50)
+    order_label = st.radio("검색 정렬", list(ORDERS.keys()), horizontal=True)
 
-    min_views = st.number_input("조회수 ≥", 0, step=1000)
+    min_views = st.number_input("최소 조회수", min_value=0, value=1000000, step=100000)
 
     run = st.button("검색", type="primary", use_container_width=True)
     st.caption("검색 1회(50개)당 API 할당량 100 소모 (일 10,000). 롱폼은 검색이 2회 실행되어 2배 소모됩니다.")
+    st.caption("버전 v4 (채널검색·표·슬라이더 제거)")
 
 if run:
     if not api_key:
         st.error("API 키를 입력하거나 secrets에 설정해 주세요.")
-    elif not query and not channel:
-        st.error("검색어 또는 채널 ID 중 하나는 필요합니다.")
+    elif not query.strip():
+        st.error("검색어를 입력해 주세요.")
     else:
         # 현재 시각 기준 N일 전 (캐시가 잘 먹도록 시 단위로 내림)
         start_dt = (datetime.now(timezone.utc) - timedelta(days=PERIODS[period])).replace(
             minute=0, second=0, microsecond=0)
         try:
             with st.spinner("조회 중..."):
-                df = fetch(api_key, query, channel.strip(),
+                df = fetch(api_key, query.strip(),
                            start_dt.strftime("%Y-%m-%dT%H:%M:%SZ"),
                            COUNTRIES[country],
                            "short" if form_label == "숏폼" else "long",
@@ -181,51 +178,36 @@ if df is not None:
         st.subheader(st.session_state.get("meta", ""))
         f = df[df["조회수"] >= min_views]
 
-        m1, m2, m3, m4 = st.columns(4)
-        m1.metric("영상 수", f"{len(f):,}")
-        m2.metric("총 조회수", f"{int(f['조회수'].sum()):,}")
-        m3.metric("총 댓글수", f"{int(f['댓글수'].sum()):,}")
-        m4.metric("총 좋아요수", f"{int(f['좋아요수'].sum()):,}")
+        if f.empty:
+            st.info(f"조회수 {min_views:,} 이상인 영상이 없습니다. 사이드바에서 최소 조회수를 낮춰 보세요. "
+                    f"(검색된 영상 {len(df)}개)")
+        else:
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("영상 수", f"{len(f):,}")
+            m2.metric("총 조회수", f"{int(f['조회수'].sum()):,}")
+            m3.metric("총 댓글수", f"{int(f['댓글수'].sum()):,}")
+            m4.metric("총 좋아요수", f"{int(f['좋아요수'].sum()):,}")
 
-        o1, o2 = st.columns([3, 1])
-        sort_col = o1.radio("정렬 기준", ["조회수", "댓글수", "좋아요수", "업로드일"], horizontal=True)
-        view = o2.radio("보기 방식", ["표", "카드"], horizontal=True)
-        f = f.sort_values(sort_col, ascending=False, na_position="last")
+            sort_col = st.radio("정렬 기준", ["조회수", "댓글수", "좋아요수", "업로드일"], horizontal=True)
+            f = f.sort_values(sort_col, ascending=False, na_position="last")
 
-        def n(v):
-            return "비공개" if pd.isna(v) else f"{int(v):,}"
+            def n(v):
+                return "비공개" if pd.isna(v) else f"{int(v):,}"
 
-        if view == "카드":
-            cards = f.head(60)
-            if len(f) > 60:
-                st.caption(f"카드 보기는 상위 60개만 표시합니다. (전체 {len(f)}개는 표 보기에서 확인)")
-            for i in range(0, len(cards), 3):
+            # ---------- 카드형 결과 ----------
+            for i in range(0, len(f), 3):
                 cols = st.columns(3)
-                for col, (_, r) in zip(cols, cards.iloc[i:i + 3].iterrows()):
+                for col, (_, r) in zip(cols, f.iloc[i:i + 3].iterrows()):
                     with col:
                         if r["썸네일"]:
                             st.image(r["썸네일"], use_container_width=True)
                         st.markdown(f"**[{r['제목']}]({r['링크']})**")
                         st.caption(f"{r['채널']} · {r['업로드일']} · {r['길이']}")
                         st.write(f"👁 {n(r['조회수'])}  💬 {n(r['댓글수'])}  👍 {n(r['좋아요수'])}")
-        else:
-            st.dataframe(
-                f,
-                use_container_width=True,
-                hide_index=True,
-                row_height=70,
-                column_config={
-                    "썸네일": st.column_config.ImageColumn("썸네일", width="medium"),
-                    "조회수": st.column_config.NumberColumn(format="%d"),
-                    "댓글수": st.column_config.NumberColumn(format="%d", help="비공개/댓글 중지는 빈칸"),
-                    "좋아요수": st.column_config.NumberColumn(format="%d", help="비공개는 빈칸"),
-                    "링크": st.column_config.LinkColumn("링크", display_text="열기"),
-                },
-            )
 
-        st.download_button(
-            "CSV 다운로드",
-            f.to_csv(index=False).encode("utf-8-sig"),
-            file_name="youtube_result.csv",
-            mime="text/csv",
-        )
+            st.download_button(
+                "CSV 다운로드",
+                f.to_csv(index=False).encode("utf-8-sig"),
+                file_name="youtube_result.csv",
+                mime="text/csv",
+            )
